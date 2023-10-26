@@ -1,4 +1,5 @@
 import numpy as np
+import time
 import torch
 # from optimal.models.gitai import GITAI
 # from gym_pybullet_drones.envs.single_agent_rl.HoverAviary import HoverAviary
@@ -58,10 +59,13 @@ class Optimizer:
 
     def grad_xu(self, i, j):
         grad = np.zeros((self.x_seq.shape[1], self.u_seq.shape[1]))
-        if j < i -1:
-            grad = np.dot(self.grad_xx(i, i-1),self.grad_xu(i-1, j))
+        if j < i - 1:
+            grad = np.einsum("ij,ij->ij",self.grad_xx(i, i-1),self.grad_xu(i-1, j))
         elif j == i - 1:
             grad = self.grad_f(self.x_seq[i-1], self.u_seq[i-1])[1]
+        # print('x/u: i,j:',i,j)
+        # print(grad)
+        # input()
         return grad
 
     def grad_xx(self, i, j):
@@ -72,6 +76,9 @@ class Optimizer:
             grad = 1 + self.grad_f(self.x_seq[i-1], self.u_seq[i-1])[0]
         elif j == i:
             grad = np.ones((self.x_seq.shape[1], self.x_seq.shape[1]))
+        # print('x/x: i,j:',i,j)
+        # print(grad)
+        # input()
         return grad
 
     def partial_lx(self, i):
@@ -86,7 +93,7 @@ class Optimizer:
         # 目的関数に依存
         # grad = np.zeros(self.u_seq.shape[1])
         omega_u = 0.2
-        omega_jerk = 10
+        omega_jerk = 1
         grad = omega_u * 2 * self.u_seq[i]
         if i == 0:
             # print("i-1:", self.u_seq[i-1])
@@ -117,7 +124,7 @@ class Optimizer:
         grad_u_clipped = np.clip(grad_u, -1, 1)
         return grad_u_clipped
 
-    def optim(self, optim_itr=5, eta=0.1, plot=False):
+    def optim(self, optim_itr = 100, eta=0.01, plot=False):
         if plot:#3d plot
             fig = plt.figure()
             ax = fig.add_subplot(111, projection='3d')
@@ -132,16 +139,34 @@ class Optimizer:
                     ax.plot([self.x_target[i][0]], [self.x_target[i][1]], [self.x_target[i][2]], marker="x", color=colors[i % len(colors)])
                     ax.plot([self.x_seq[i][0]], [self.x_seq[i][1]], [self.x_seq[i][2]], marker="o", color=colors[i % len(colors)])
             # plt.show()
-        for _ in range(optim_itr):
+            
+        X,Y,Z = [],[],[]
+
+        for i in range(optim_itr):
+            cm = plt.get_cmap("Spectral")
+            z = i/optim_itr
             grad = self.compute_grad()
-            # print("grad:", grad)
+                # print("grad:", grad)
             self.u_seq = self.u_seq - eta * grad
             self.compute_x_seq(self.u_seq)
+            
+            X = np.append(X,[self.x_seq[:, 0]])
+            Y = np.append(Y,[self.x_seq[:, 1]])
+            Z = np.append(Z,[self.x_seq[:, 2]])
+            
+            X = X.reshape([i+1,self.x_seq.shape[0]])
+            Y = Y.reshape([i+1,self.x_seq.shape[0]])
+            Z = Z.reshape([i+1,self.x_seq.shape[0]])
+        
+
             if plot:
-                ax.plot(self.x_seq[:, 0], self.x_seq[:, 1], self.x_seq[:, 2], marker=",")
-                # plt.show()
+                ax.plot(X[i], Y[i], Z[i], marker=",", color = cm(z)) 
+                plt.pause(0.001)
+
         if plot:
-            plt.show()
+            plt.savefig('oo->xx.png')
+            plt.pause(0)            
+
 
         return self.u_seq
 
@@ -159,16 +184,17 @@ if __name__ == "__main__":
     #     input_shape=env.observation_space.shape[0]+env.action_space.shape[0],
     #     device=device)
 
-    time_step = 20
+    time_step = 50
     state_dim = 12 # x, y, z, roll, pitch, yaw, vx, vy, vz, wx, wy, wz
     initial_x = np.zeros(state_dim)
-    initial_u_seq = np.concatenate([np.array([[1, 0.2, 0.2, 0] for _ in range(int(time_step/2))]), np.array([[1, -0.2, 0.2, 0] for _ in range(int(time_step/2))])]) # thrust, roll, pitch, yaw
+    initial_u_seq = np.concatenate([np.array([[1, 0.2, 0.2, 0, 0, 0, 0, 0, 0, 0, 0, 0] for _ in range(int(time_step/2))]), np.array([[1, -0.2, 0.2, 0, 0, 0, 0, 0, 0, 0, 0, 0] for _ in range(int(time_step/2))])]) # thrust, roll, pitch, yaw
     model_based = True
 
     x_target = [None for _ in range(time_step)]
-    x_target[10] = np.array([1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
-    x_target[-1] = np.array([10, 0.1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
-
+    x_target[10] = np.array([1, 0, 0,
+                             0, 0, 0, 0, 0, 0, 0, 0, 0])
+    x_target[-1] = np.array([0, 10, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+    print('start')
     optim = Optimizer(
         initial_x=initial_x,
         u_seq=initial_u_seq,
@@ -178,3 +204,4 @@ if __name__ == "__main__":
         model_based=model_based
         )
     optim.optim(plot=True)
+    print('end')
